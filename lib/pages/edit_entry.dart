@@ -1,20 +1,22 @@
-import 'dart:math';
-
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
-import 'package:journal/classes/journal.dart';
-import 'package:journal/classes/journal_edit.dart';
+import 'package:journal/blocs/journal_edit_bloc.dart';
+import 'package:journal/classes/format_dates.dart';
+import 'package:journal/classes/mood_icons.dart';
+import 'package:journal/events/save_journal.dart';
+import 'package:journal/events/update_date.dart';
+import 'package:journal/events/update_mood.dart';
+import 'package:journal/events/update_note.dart';
+import 'package:journal/providers/journal_edit_bloc_provier.dart';
+import 'package:journal/state/journal_edit_state.dart';
 
 class EditEntry extends StatefulWidget {
   final bool add;
   final int index;
-  final JournalEdit journalEdit;
 
   const EditEntry({
     super.key,
     required this.add,
     required this.index,
-    required this.journalEdit,
   });
 
   @override
@@ -22,100 +24,81 @@ class EditEntry extends StatefulWidget {
 }
 
 class _EditEntryState extends State<EditEntry> {
-  late JournalEdit _journalEdit;
+  late JournalEditBloc _journalEditBloc;
+  late FormatDates formatDates;
+  late MoodIcons moodIcons;
   late String _title;
-  late DateTime _selectedDate;
-  final TextEditingController _moodController = TextEditingController();
-  final TextEditingController _noteController = TextEditingController();
-  final FocusNode _moodFocus = FocusNode();
+  TextEditingController _noteController = TextEditingController();
   final FocusNode _noteFocus = FocusNode();
 
   @override
-  void initState() {
-    super.initState();
-
-    _journalEdit = JournalEdit(
-      action: 'Cancel', 
-      journal: widget.journalEdit.journal,
-    );
-    _title = widget.add ? 'Add' : 'Edit';
-    
-    if (widget.add) {
-      _selectedDate = DateTime.now();
-      _moodController.text = '';
-      _noteController.text = '';
-    } else {
-      _selectedDate = DateTime.parse(_journalEdit.journal.date);
-      _moodController.text = _journalEdit.journal.mood;
-      _noteController.text = _journalEdit.journal.note;
-    }
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _journalEditBloc = JournalEditBlocProvier.of(context);
   }
 
   @override
   void dispose() {
-    _moodController.dispose();
     _noteController.dispose();
-    _moodFocus.dispose();
     _noteFocus.dispose();
 
     super.dispose();
   }
 
   // Date Picker
-  Future<DateTime> _selectDate(DateTime selectedDate) async {
-    final DateTime _initialDate = selectedDate;
-    final DateTime? _pickedDate = await showDatePicker(
+  Future<String> _selectDate(String selectedDate) async {
+    final DateTime initialDate = DateTime.parse(selectedDate);
+    final DateTime? pickedDate = await showDatePicker(
       context: context, 
-      initialDate: _initialDate,
+      initialDate: initialDate,
       firstDate: DateTime.now().subtract(Duration(days: 365)),
       lastDate: DateTime.now().add(Duration(days: 365)),
     );
 
-    if (_pickedDate == null) {
-      return selectedDate;
+    if (pickedDate != null) {
+      selectedDate = DateTime(
+        pickedDate.year,
+        pickedDate.month,
+        pickedDate.day,
+        initialDate.hour,
+        initialDate.minute,
+        initialDate.second,
+        initialDate.millisecond,
+        initialDate.microsecond
+      ).toString();
     }
     
-    return DateTime(
-      _pickedDate.year,
-      _pickedDate.month,
-      _pickedDate.day,
-      _initialDate.hour,
-      _initialDate.minute,
-      _initialDate.second,
-      _initialDate.millisecond,
-      _initialDate.microsecond
-    );
+    return selectedDate;
   }
 
-  void _saveEntry() {
-    _journalEdit.action = 'Save';
+  Future<void> _saveEntry() async {
+    await _journalEditBloc.addEvent(SaveJournal());
 
-    final String id = widget.add
-      ? Random()
-        .nextInt(9999999)
-        .toString()
-      : _journalEdit.journal.id;
+    print("Save entry clicked on editEntry");
 
-    _journalEdit.journal = Journal(
-      id: id, 
-      date: _selectedDate.toIso8601String(), 
-      mood: _moodController.text.trim(), 
-      note: _noteController.text.trim(),
-    );
-
-    Navigator.pop(
-      context,
-      _journalEdit,
-    );
+    if (!mounted) return;
+    
+    Navigator.pop(context);
   }
 
   void _cancelEntry() {
-    _journalEdit.action = 'Cancel';
-
     Navigator.pop(
       context,
-      _journalEdit,
     );
+  }
+
+  @override 
+  void initState() {
+    super.initState();
+    formatDates = FormatDates();
+    moodIcons = MoodIcons(
+      title: '', 
+      color: Colors.transparent,
+      rotation: 0,
+      icon: Icons.circle,
+    );
+    _noteController = TextEditingController();
+    _title = widget.add ? 'Add' : 'Edit';
   }
 
   @override
@@ -125,18 +108,29 @@ class _EditEntryState extends State<EditEntry> {
       appBar: AppBar(
         title: Text('$_title Entry'),
         automaticallyImplyActions: false,
+        elevation: 0.0,
+        flexibleSpace: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Colors.lightGreen, Colors.lightGreen.shade100],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+            ),
+          ),
+        ),
       ),
       body: SingleChildScrollView(
         padding: EdgeInsets.all(16.0),
         child: Column(
           children: [
-            FilledButton(
-              onPressed: () async {
-                FocusScope.of(context).unfocus();
-                final DateTime _pickerDate = await _selectDate(_selectedDate);
-                setState(() {
-                  _selectedDate = _pickerDate;
-                });
+            ValueListenableBuilder<JournalEditState>(
+              valueListenable: _journalEditBloc.state, 
+              builder: (context, state, _) {
+                return  FilledButton(
+                  onPressed: () async {
+                  FocusScope.of(context).unfocus();
+                  final String pickedDate = await _selectDate(state.journal.date);
+                  _journalEditBloc.addEvent(UpdateDate(pickedDate));
               }, 
               child: Row(
                 children: [
@@ -147,7 +141,7 @@ class _EditEntryState extends State<EditEntry> {
                   ),
                   const SizedBox(width: 16.0),
                   Text(
-                    DateFormat.yMMMEd().format(_selectedDate),
+                    formatDates.dateFormatShortMonthDayYear(state.journal.date),
                     style: const TextStyle(
                       color: Colors.black54,
                       fontWeight: FontWeight.bold,
@@ -159,33 +153,73 @@ class _EditEntryState extends State<EditEntry> {
                   ),
                 ],
               )
+            );
+              }
             ),
-            TextField(
-              controller: _moodController,
-              autofocus: true,
-              textInputAction: TextInputAction.next,
-              focusNode: _moodFocus,
-              textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(
-                labelText: 'Mood',
-                icon: Icon(Icons.mood),
-              ),
-              onSubmitted: (_) {
-                FocusScope.of(context).requestFocus(_noteFocus);
-              },
+            ValueListenableBuilder<JournalEditState>(
+              valueListenable: _journalEditBloc.state, 
+              builder: (context, state, _) {
+                final moods = moodIcons.getMoodIconsList();
+                final selectedMood = moods.firstWhere(
+                  (m) => m.title == state.journal.mood,
+                  orElse: () => moods.first,
+                );
+                return DropdownButtonHideUnderline(
+                  child: DropdownButton(
+                    value: selectedMood,
+                    items: moodIcons.getMoodIconsList().map((MoodIcons selected) {
+                      return DropdownMenuItem<MoodIcons>(
+                        value: selected,
+                        child: Row(
+                          children: [
+                            Transform(
+                              transform: Matrix4.identity()..rotateZ(
+                                moodIcons.getMoodRotation(selected.title)
+                              ),
+                              alignment: Alignment.center,
+                              child: Icon(
+                                moodIcons.getMoodIcon(selected.title),
+                                color: moodIcons.getMoodColor(selected.title),
+                              ),
+                            ),
+                            SizedBox(width: 15.0,),
+                            Text(selected.title)
+                          ],
+                        )
+                      );
+                    }).toList(), 
+                    onChanged: (MoodIcons? selected) {
+                      if (selected != null) {
+                        _journalEditBloc.addEvent(UpdateMood(selected.title));
+                      }
+                    }
+                  )
+                );
+              }
             ),
-            TextField(
-              controller: _noteController,
-              textInputAction: TextInputAction.newline,
-              focusNode: _noteFocus,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(
-                labelText: 'Note',
-                icon: Icon(Icons.subject),
-              ),
-              maxLines: null,
+            ValueListenableBuilder<JournalEditState>(
+              valueListenable: _journalEditBloc.state, 
+              builder: (context, state, _) {
+          
+                // Use the copyWith to make sure when you edit TextField the cursor
+                // does not bounce to the first character
+                _noteController.text = state.journal.note;
+
+                return TextField(
+                  controller: _noteController,
+                  textInputAction: TextInputAction.newline,
+                  focusNode: _noteFocus,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: const InputDecoration(
+                    labelText: 'Note',
+                    icon: Icon(Icons.subject),
+                  ),
+                  maxLines: null,
+                  onChanged: (note) => _journalEditBloc.addEvent(UpdateNote(note)),
+                );
+              }
             ),
-            const SizedBox(height: 24,),
+            const SizedBox(height: 24.0,),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
