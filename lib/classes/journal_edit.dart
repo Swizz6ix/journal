@@ -1,4 +1,4 @@
-import 'package:journal/classes/journal.dart';
+import 'package:journal/models/journal.dart';
 
 class JournalEdit {
   String action;
